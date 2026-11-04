@@ -161,6 +161,8 @@ class LocationTrackingService : Service() {
     private fun stopTracking() {
         isRunning = false
         isStationary = false
+        totalOdometer = 0.0
+        lastValidLocation = null
         heartbeatHandler.removeCallbacks(heartbeatRunnable)
         fusedLocationClient.removeLocationUpdates(locationCallback)
         stationaryGeofenceMgr.disarmStationaryGeofence()
@@ -244,6 +246,14 @@ class LocationTrackingService : Service() {
             dbHelper.insertLog("WARN", "Mock location spoof detected! [lat=${location.latitude}, lng=${location.longitude}]")
         }
 
+        val isNetworkOnline = httpSyncMgr.isNetworkAvailable()
+        val isAppAttached = CustomBackgroundGeolocationPlugin.isEngineAttached
+        val isSynced = if (HttpSyncManager.syncUrl.isNullOrEmpty()) {
+            isNetworkOnline && isAppAttached
+        } else {
+            false
+        }
+
         val entity = LocationEntity(
             uuid = UUID.randomUUID().toString(),
             latitude = location.latitude,
@@ -258,7 +268,7 @@ class LocationTrackingService : Service() {
             batteryLevel = batteryLevel,
             batteryIsCharging = isCharging,
             timestamp = location.time.takeIf { it > 0 } ?: System.currentTimeMillis(),
-            isSynced = false,
+            isSynced = isSynced,
             isMock = isMock,
             extrasJson = extrasJson
         )

@@ -2,6 +2,7 @@
 library custom_background_geolocation;
 
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/services.dart';
 
 import 'models/bg_config.dart';
@@ -35,7 +36,8 @@ class CustomBackgroundGeolocation {
 
   /// Configure the plugin with desired accuracy, distanceFilter, and sync options.
   static Future<bool> ready(BgConfig config) async {
-    final result = await _methodChannel.invokeMethod<bool>('ready', config.toMap());
+    final result =
+        await _methodChannel.invokeMethod<bool>('ready', config.toMap());
     return result ?? false;
   }
 
@@ -115,19 +117,22 @@ class CustomBackgroundGeolocation {
   /// Request exemption from Android Battery Optimization (Doze Mode).
   /// Launches native system dialog "Let app always run in background? [Deny] [Allow]".
   static Future<bool> requestBatteryExemption() async {
-    final result = await _methodChannel.invokeMethod<bool>('requestBatteryExemption');
+    final result =
+        await _methodChannel.invokeMethod<bool>('requestBatteryExemption');
     return result ?? false;
   }
 
   /// Check whether battery optimization is currently ignored (unrestricted) for this app.
   static Future<bool> isIgnoringBatteryOptimizations() async {
-    final result = await _methodChannel.invokeMethod<bool>('isIgnoringBatteryOptimizations');
+    final result = await _methodChannel
+        .invokeMethod<bool>('isIgnoringBatteryOptimizations');
     return result ?? true;
   }
 
   /// Comprehensive check of all required permissions and battery states.
   static Future<Map<String, dynamic>> checkPermissionStatus() async {
-    final map = await _methodChannel.invokeMethod<Map<dynamic, dynamic>>('checkPermissionStatus');
+    final map = await _methodChannel
+        .invokeMethod<Map<dynamic, dynamic>>('checkPermissionStatus');
     if (map == null) return {};
     return Map<String, dynamic>.from(map);
   }
@@ -169,17 +174,17 @@ class CustomBackgroundGeolocation {
 
   /// Stream of location updates as the user moves.
   static Stream<BgLocation> get onLocation {
-    _locationStream ??= _locationEventChannel
-        .receiveBroadcastStream()
-        .map((event) => BgLocation.fromMap(Map<dynamic, dynamic>.from(event as Map)));
+    _locationStream ??= _locationEventChannel.receiveBroadcastStream().map(
+        (event) =>
+            BgLocation.fromMap(Map<dynamic, dynamic>.from(event as Map)));
     return _locationStream!;
   }
 
   /// Stream of motion activity transitions (still, walking, driving, running).
   static Stream<BgMotionActivity> get onMotionChange {
-    _motionStream ??= _motionEventChannel
-        .receiveBroadcastStream()
-        .map((event) => BgMotionActivity.fromMap(Map<dynamic, dynamic>.from(event as Map)));
+    _motionStream ??= _motionEventChannel.receiveBroadcastStream().map(
+        (event) =>
+            BgMotionActivity.fromMap(Map<dynamic, dynamic>.from(event as Map)));
     return _motionStream!;
   }
 
@@ -199,11 +204,14 @@ class CustomBackgroundGeolocation {
     return _heartbeatStream!;
   }
 
-  /// Retrieve all locally cached SQLite locations (useful when phone was unreachable).
-  static Future<List<BgLocation>> getLocations({bool unsyncedOnly = false}) async {
+  /// Retrieve locally cached SQLite locations (useful when phone was unreachable / offline).
+  static Future<List<BgLocation>> getLocations({
+    bool unsyncedOnly = false,
+    int limit = 1250,
+  }) async {
     final list = await _methodChannel.invokeListMethod<Map<dynamic, dynamic>>(
       'getLocations',
-      {'unsyncedOnly': unsyncedOnly},
+      {'unsyncedOnly': unsyncedOnly, 'limit': limit},
     );
     if (list == null) return [];
     return list.map((item) => BgLocation.fromMap(item)).toList();
@@ -242,6 +250,15 @@ class CustomBackgroundGeolocation {
     return result ?? false;
   }
 
+  /// Wipes all historical SQLite location fixes, clears diagnostic logs,
+  /// stops tracking, and restarts fresh from 0.00 km odometer.
+  static Future<bool> resetAndRestart() async {
+    await stop();
+    await destroyLocations();
+    await destroyLog();
+    return await start();
+  }
+
   /// Append a custom entry to the persistent native SQLite logger.
   static Future<bool> log(String level, String message) async {
     final result = await _methodChannel.invokeMethod<bool>('log', {
@@ -253,7 +270,81 @@ class CustomBackgroundGeolocation {
 
   /// Opens email client with device tracking diagnostic logs pre-attached.
   static Future<bool> emailLog(String email) async {
-    final result = await _methodChannel.invokeMethod<bool>('emailLog', {'email': email});
+    final result =
+        await _methodChannel.invokeMethod<bool>('emailLog', {'email': email});
     return result ?? false;
+  }
+
+  /// Generates a structured human-readable audit report comparing normal online tracking
+  /// vs offline outage / airplane mode / app killed tracking.
+  static Future<String> generateAuditReport({int limit = 250}) async {
+    final locations = await getLocations(limit: limit);
+    final systemLogs = await getLog();
+
+    final buffer = StringBuffer();
+    final now = DateTime.now();
+    buffer.writeln('====================================================');
+    buffer.writeln('  CUSTOM BACKGROUND GEOLOCATION AUDIT REPORT');
+    buffer.writeln('  Generated: $now');
+    buffer.writeln('====================================================\n');
+
+    final outagePoints = locations.where((l) => !l.isSynced).toList();
+    final syncedPoints = locations.where((l) => l.isSynced).toList();
+    final currentOdometer =
+        locations.isNotEmpty ? locations.first.odometerKm : 0.0;
+
+    buffer.writeln('SUMMARY:');
+    buffer.writeln('  • Total Recorded Fixes:    ${locations.length}');
+    buffer.writeln(
+        '  • Normal / Synced Fixes:   ${syncedPoints.length} (🟢 LIVE)');
+    buffer.writeln(
+        '  • Outage / Offline Fixes:  ${outagePoints.length} (🔴 OUTAGE / KILLED)');
+    buffer.writeln(
+        '  • Current Odometer:        ${currentOdometer.toStringAsFixed(2)} km\n');
+
+    buffer.writeln('----------------------------------------------------');
+    buffer.writeln('RECORDED GPS FIXES (Most recent first)');
+    buffer.writeln('----------------------------------------------------');
+    if (locations.isEmpty) {
+      buffer.writeln('No location fixes recorded in SQLite yet.\n');
+    } else {
+      for (final loc in locations) {
+        final tag = loc.isSynced ? '[🟢 NORMAL/LIVE]' : '[🔴 OUTAGE/KILLED]';
+        buffer.writeln(
+            '$tag ${loc.dateTime} | Coords: ${loc.coordinates} | Speed: ${loc.speedKmH.toStringAsFixed(1)} km/h | Odo: ${loc.odometerKm.toStringAsFixed(2)} km | Batt: ${loc.batteryPercent}% (${loc.batteryIsCharging ? "Charging" : "Discharging"}) | Motion: ${loc.activityType}');
+      }
+      buffer.writeln('');
+    }
+
+    if (systemLogs.isNotEmpty) {
+      buffer.writeln('----------------------------------------------------');
+      buffer.writeln('SYSTEM & BACKGROUND SERVICE LOGS');
+      buffer.writeln('----------------------------------------------------');
+      buffer.writeln(systemLogs);
+    }
+
+    buffer.writeln('====================================================');
+    buffer.writeln('  END OF AUDIT REPORT');
+    buffer.writeln('====================================================');
+
+    return buffer.toString();
+  }
+
+  /// Exports the structured audit report directly to a local .txt file on the device.
+  /// If [customPath] is omitted, saves to the system temporary directory as `gps_tracking_audit_log.txt`.
+  /// Returns the absolute path of the created file.
+  static Future<String> exportAuditLogToFile(
+      {String? customPath, int limit = 250}) async {
+    final report = await generateAuditReport(limit: limit);
+    final File file;
+    if (customPath != null && customPath.isNotEmpty) {
+      file = File(customPath);
+    } else {
+      final tempDir = Directory.systemTemp;
+      file = File('${tempDir.path}/gps_tracking_audit_log.txt');
+    }
+    await file.parent.create(recursive: true);
+    await file.writeAsString(report, flush: true);
+    return file.path;
   }
 }

@@ -50,7 +50,7 @@ class CustomBackgroundGeolocationPlugin : FlutterPlugin, ActivityAware, MethodCh
         private const val HEARTBEAT_EVENT_CHANNEL_NAME = "com.custom.bglocation/events/heartbeat"
 
         @Volatile
-        private var isEngineAttached = false
+        var isEngineAttached = false
         private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
         private var locationEventSink: EventChannel.EventSink? = null
@@ -700,10 +700,11 @@ class CustomBackgroundGeolocationPlugin : FlutterPlugin, ActivityAware, MethodCh
 
     private fun handleGetLocations(call: MethodCall, result: MethodChannel.Result) {
         val unsyncedOnly = call.argument<Boolean>("unsyncedOnly") ?: false
+        val limit = call.argument<Int>("limit") ?: 250
         val list = if (unsyncedOnly) {
-            dbHelper.getUnsyncedLocations(100)
+            dbHelper.getUnsyncedLocations(limit)
         } else {
-            dbHelper.getAllLocations(100)
+            dbHelper.getAllLocations(limit)
         }
         result.success(list.map { it.toMap() })
     }

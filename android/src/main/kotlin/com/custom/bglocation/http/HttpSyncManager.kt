@@ -102,8 +102,14 @@ class HttpSyncManager(private val context: Context) {
     fun syncPendingLocations(onComplete: ((Boolean, Int) -> Unit)? = null) {
         val targetUrl = syncUrl
         if (targetUrl.isNullOrEmpty()) {
-            Log.d(TAG, "No syncUrl configured. Locations remain safely saved in local SQLite.")
-            onComplete?.invoke(false, 0)
+            if (isNetworkAvailable()) {
+                val count = dbHelper.markAllAsSynced()
+                Log.d(TAG, "No syncUrl configured. Marked $count pending locations as synced because network is active.")
+                onComplete?.invoke(true, count)
+            } else {
+                Log.d(TAG, "No syncUrl configured and network offline. Leaving locations queued in SQLite.")
+                onComplete?.invoke(false, 0)
+            }
             return
         }
 

@@ -248,6 +248,15 @@ class LocationDatabaseHelper private constructor(context: Context) :
     }
 
     @Synchronized
+    fun markAllAsSynced(): Int {
+        val db = writableDatabase
+        val cv = ContentValues().apply { put(COL_IS_SYNCED, 1) }
+        val count = db.update(TABLE_NAME, cv, "$COL_IS_SYNCED = 0", null)
+        Log.d(TAG, "Marked all $count pending locations as synced in SQLite.")
+        return count
+    }
+
+    @Synchronized
     fun clearAll() {
         val db = writableDatabase
         db.delete(TABLE_NAME, null, null)
