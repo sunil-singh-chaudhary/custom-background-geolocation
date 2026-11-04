@@ -34,6 +34,11 @@ class CustomBackgroundGeolocation {
   static Stream<Map<String, dynamic>>? _geofenceStream;
   static Stream<Map<String, dynamic>>? _heartbeatStream;
 
+  static StreamSubscription<BgLocation>? _quickStartLocationSub;
+  static StreamSubscription<BgMotionActivity>? _quickStartMotionSub;
+  static StreamSubscription<Map<String, dynamic>>? _quickStartGeofenceSub;
+  static StreamSubscription<Map<String, dynamic>>? _quickStartHeartbeatSub;
+
   /// Configure the plugin with desired accuracy, distanceFilter, and sync options.
   static Future<bool> ready(BgConfig config) async {
     final result =
@@ -64,6 +69,16 @@ class CustomBackgroundGeolocation {
     String notificationText = 'Live background tracking active',
     bool autoSyncOnConnectivity = true,
   }) async {
+    // Cancel any prior quickStart subscriptions to avoid duplicate listeners on clean restart
+    await _quickStartLocationSub?.cancel();
+    _quickStartLocationSub = null;
+    await _quickStartMotionSub?.cancel();
+    _quickStartMotionSub = null;
+    await _quickStartGeofenceSub?.cancel();
+    _quickStartGeofenceSub = null;
+    await _quickStartHeartbeatSub?.cancel();
+    _quickStartHeartbeatSub = null;
+
     final config = BgConfig(
       distanceFilter: distanceFilter,
       stationaryRadius: stationaryRadius,
@@ -79,16 +94,21 @@ class CustomBackgroundGeolocation {
     await start();
 
     if (onMotionChange != null) {
-      CustomBackgroundGeolocation.onMotionChange.listen(onMotionChange);
+      _quickStartMotionSub =
+          CustomBackgroundGeolocation.onMotionChange.listen(onMotionChange);
     }
     if (onGeofence != null) {
-      CustomBackgroundGeolocation.onGeofence.listen(onGeofence);
+      _quickStartGeofenceSub =
+          CustomBackgroundGeolocation.onGeofence.listen(onGeofence);
     }
     if (onHeartbeat != null) {
-      CustomBackgroundGeolocation.onHeartbeat.listen(onHeartbeat);
+      _quickStartHeartbeatSub =
+          CustomBackgroundGeolocation.onHeartbeat.listen(onHeartbeat);
     }
 
-    return CustomBackgroundGeolocation.onLocation.listen(onLocation);
+    _quickStartLocationSub =
+        CustomBackgroundGeolocation.onLocation.listen(onLocation);
+    return _quickStartLocationSub!;
   }
 
   /// ONE-LINE LISTENER:
@@ -152,6 +172,15 @@ class CustomBackgroundGeolocation {
 
   /// Stop background location tracking.
   static Future<bool> stop() async {
+    await _quickStartLocationSub?.cancel();
+    _quickStartLocationSub = null;
+    await _quickStartMotionSub?.cancel();
+    _quickStartMotionSub = null;
+    await _quickStartGeofenceSub?.cancel();
+    _quickStartGeofenceSub = null;
+    await _quickStartHeartbeatSub?.cancel();
+    _quickStartHeartbeatSub = null;
+
     final result = await _methodChannel.invokeMethod<bool>('stop');
     return result ?? false;
   }
@@ -308,10 +337,12 @@ class CustomBackgroundGeolocation {
     if (locations.isEmpty) {
       buffer.writeln('No location fixes recorded in SQLite yet.\n');
     } else {
-      for (final loc in locations) {
+      for (int i = 0; i < locations.length; i++) {
+        final loc = locations[i];
+        final indexNo = '#${i + 1}'.padRight(5);
         final tag = loc.isSynced ? '[🟢 NORMAL/LIVE]' : '[🔴 OUTAGE/KILLED]';
         buffer.writeln(
-            '$tag ${loc.dateTime} | Coords: ${loc.coordinates} | Speed: ${loc.speedKmH.toStringAsFixed(1)} km/h | Odo: ${loc.odometerKm.toStringAsFixed(2)} km | Batt: ${loc.batteryPercent}% (${loc.batteryIsCharging ? "Charging" : "Discharging"}) | Motion: ${loc.activityType}');
+            '$indexNo $tag ${loc.dateTime} | Coords: ${loc.coordinates} | Speed: ${loc.speedKmH.toStringAsFixed(1)} km/h | Odo: ${loc.odometerKm.toStringAsFixed(2)} km | Batt: ${loc.batteryPercent}% (${loc.batteryIsCharging ? "Charging" : "Discharging"}) | Motion: ${loc.activityType}');
       }
       buffer.writeln('');
     }

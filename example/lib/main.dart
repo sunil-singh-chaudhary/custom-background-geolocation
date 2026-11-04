@@ -27,6 +27,7 @@ class _LocationTrackerExampleAppState extends State<LocationTrackerExampleApp> {
   int _unsyncedCount = 0;
   LogFilter _selectedFilter = LogFilter.all;
   String? _lastExportedFilePath;
+  bool _isDeskMode = true; // Enabled by default so testers can test from their desk without moving!
 
   @override
   void initState() {
@@ -51,12 +52,19 @@ class _LocationTrackerExampleAppState extends State<LocationTrackerExampleApp> {
   /// Initializes and begins background tracking with callbacks.
   Future<void> _startTracking() async {
     await CustomBackgroundGeolocation.quickStart(
+      distanceFilter: _isDeskMode ? 0.0 : 15.0,
+      stationaryRadius: _isDeskMode ? 0.0 : 25.0,
       onLocation: (location) {
         setState(() {
           _currentLocation = location;
-          _storedLocations.insert(0, location);
-          if (!location.isSynced) {
-            _unsyncedCount++;
+          final alreadyExists = _storedLocations.any((l) =>
+              (l.uuid.isNotEmpty && l.uuid == location.uuid) ||
+              (l.timestamp > 0 && l.timestamp == location.timestamp));
+          if (!alreadyExists) {
+            _storedLocations.insert(0, location);
+            if (!location.isSynced) {
+              _unsyncedCount++;
+            }
           }
         });
       },
@@ -65,12 +73,35 @@ class _LocationTrackerExampleAppState extends State<LocationTrackerExampleApp> {
           _currentActivity = motion.type;
         });
       },
-      notificationTitle: 'Live Geolocation & Odometer',
-      notificationText: 'Tracking active across background and outages',
+      notificationTitle: _isDeskMode ? '🧪 Desk Test Mode Active (0m)' : 'Live Geolocation & Odometer',
+      notificationText: _isDeskMode
+          ? 'Fast updates active (every 10s without moving)'
+          : 'Tracking active across background and outages (15m filter)',
     );
 
     setState(() => _isTracking = true);
     await _refreshFromDatabase();
+  }
+
+  Future<void> _toggleDeskMode() async {
+    setState(() {
+      _isDeskMode = !_isDeskMode;
+    });
+    if (_isTracking) {
+      await CustomBackgroundGeolocation.stop();
+      await _startTracking();
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_isDeskMode
+              ? '🧪 Desk Mode ON: GPS updates every 10s (No movement required!)'
+              : '🔋 Field Mode ON: GPS sleeps when still (15m movement required).'),
+          backgroundColor: _isDeskMode ? const Color(0xFF10B981) : const Color(0xFF0284C7),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   Future<void> _toggleTracking() async {
@@ -472,6 +503,56 @@ class _LocationTrackerExampleAppState extends State<LocationTrackerExampleApp> {
               ),
             ),
 
+            // Desk Mode Toggle
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  InkWell(
+                    onTap: _toggleDeskMode,
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: _isDeskMode
+                            ? const Color(0xFF10B981).withValues(alpha: 0.18)
+                            : const Color(0xFF475569).withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: _isDeskMode ? const Color(0xFF10B981) : const Color(0xFF64748B),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _isDeskMode ? Icons.bolt : Icons.nature_people,
+                            size: 16,
+                            color: _isDeskMode ? const Color(0xFF10B981) : Colors.white70,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            _isDeskMode ? '🧪 Desk Mode: 0m (Fast Updates)' : '🔋 Field Mode: 15m (Battery Saver)',
+                            style: TextStyle(
+                              color: _isDeskMode ? const Color(0xFF10B981) : Colors.white70,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Text(
+                    _isDeskMode ? '⚡ Updates every 10s' : '🚶 Needs 15m walk',
+                    style: const TextStyle(color: Colors.white54, fontSize: 11),
+                  ),
+                ],
+              ),
+            ),
+
             // Live Outage Testing Banner / Instructions
             Container(
               margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -481,14 +562,16 @@ class _LocationTrackerExampleAppState extends State<LocationTrackerExampleApp> {
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: const Color(0xFF334155)),
               ),
-              child: const Row(
+              child: Row(
                 children: [
-                  Icon(Icons.science_outlined, color: Color(0xFFF59E0B), size: 18),
-                  SizedBox(width: 8),
+                  const Icon(Icons.science_outlined, color: Color(0xFFF59E0B), size: 18),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Live Test: Turn on Airplane Mode or kill the app. Walk 100m, then re-open to inspect offline fixes below in RED.',
-                      style: TextStyle(color: Colors.white70, fontSize: 11),
+                      _isDeskMode
+                          ? 'Desk Mode Active: Turn off Wi-Fi or turn on Airplane Mode for 10s right now to see new fixes in RED.'
+                          : 'Field Mode Active: Turn off Wi-Fi or turn on Airplane Mode and walk 20m to record outage fixes in RED.',
+                      style: const TextStyle(color: Colors.white70, fontSize: 11),
                     ),
                   ),
                 ],
@@ -627,13 +710,36 @@ class _LocationTrackerExampleAppState extends State<LocationTrackerExampleApp> {
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-                                    Text(
-                                      tagText,
-                                      style: TextStyle(
-                                        color: tagColor,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 10,
-                                      ),
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: tagColor.withValues(alpha: 0.18),
+                                            borderRadius: BorderRadius.circular(4),
+                                            border: Border.all(color: tagColor.withValues(alpha: 0.5)),
+                                          ),
+                                          child: Text(
+                                            index == 0 ? '#1 (Latest)' : '#${index + 1}',
+                                            style: TextStyle(
+                                              color: tagColor,
+                                              fontWeight: FontWeight.w900,
+                                              fontSize: 10,
+                                              fontFamily: 'monospace',
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          tagText,
+                                          style: TextStyle(
+                                            color: tagColor,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 10,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                     Text(
                                       '${loc.dateTime.hour.toString().padLeft(2, '0')}:${loc.dateTime.minute.toString().padLeft(2, '0')}:${loc.dateTime.second.toString().padLeft(2, '0')}',

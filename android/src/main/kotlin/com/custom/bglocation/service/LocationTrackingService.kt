@@ -98,9 +98,8 @@ class LocationTrackingService : Service() {
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
-            for (location in result.locations) {
-                processLocation(location)
-            }
+            val location = result.lastLocation ?: return
+            processLocation(location)
         }
     }
 
@@ -174,14 +173,18 @@ class LocationTrackingService : Service() {
 
     @SuppressLint("MissingPermission")
     private fun requestLocationUpdates() {
-        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000L)
+        fusedLocationClient.removeLocationUpdates(locationCallback)
+        val intervalMs = if (distanceFilter <= 0.0f) 10000L else 10000L
+        val minIntervalMs = if (distanceFilter <= 0.0f) 5000L else 5000L
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, intervalMs)
             .setMinUpdateDistanceMeters(distanceFilter)
-            .setMinUpdateIntervalMillis(2000L)
+            .setMinUpdateIntervalMillis(minIntervalMs)
+            .setMaxUpdateDelayMillis(0)
             .build()
 
         fusedLocationClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
             .addOnSuccessListener {
-                Log.i(TAG, "Fused location updates active with distanceFilter = ${distanceFilter}m.")
+                Log.i(TAG, "Fused location updates active with distanceFilter = ${distanceFilter}m (interval=${intervalMs}ms).")
             }
             .addOnFailureListener { e ->
                 Log.e(TAG, "Failed to request location updates: ${e.message}", e)
@@ -189,6 +192,10 @@ class LocationTrackingService : Service() {
     }
 
     private fun handleEnterStationary() {
+        if (stationaryRadius <= 0.0f) {
+            Log.i(TAG, "stationaryRadius is 0.0m (Desk / Continuous mode enabled). Keeping GPS active.")
+            return
+        }
         if (isStationary) return
         isStationary = true
 
@@ -221,8 +228,21 @@ class LocationTrackingService : Service() {
             return
         }
 
-        // Accumulate odometer
+        // Deduplication: Guard against duplicate fixes with identical timestamp or identical coordinates within 1s window
         val prev = lastValidLocation
+        if (prev != null) {
+            if (location.time > 0 && location.time == prev.time) {
+                Log.d(TAG, "Skipping duplicate location with identical timestamp: ${location.time}")
+                return
+            }
+            if (location.latitude == prev.latitude && location.longitude == prev.longitude &&
+                Math.abs(location.time - prev.time) < 1000) {
+                Log.d(TAG, "Skipping identical coordinate fix within 1s window.")
+                return
+            }
+        }
+
+        // Accumulate odometer
         if (prev != null) {
             val dist = prev.distanceTo(location)
             if (dist > 1.0f) {

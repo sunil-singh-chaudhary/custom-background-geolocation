@@ -27,9 +27,9 @@ When the user is viewing your app, updates stream directly to your UI at high fr
 
 ```text
 ┌────────────────────────────────────────────────────────┐
-│  📡 Background Geolocation                      [ 🛑 ] │
+│  📡 Background Geolocation                      [ 🛑 ]│
 ├────────────────────────────────────────────────────────┤
-│  🟢 Tracking Active           Activity: 🚗 in_vehicle  │
+│  🟢 Tracking Active           Activity: 🚗 in_vehicle │
 │ ────────────────────────────────────────────────────── │
 │   Coordinates       Speed        Odometer     Battery  │
 │  28.6262, 77.3787  42.5 km/h     3.84 km        73%    │
@@ -301,6 +301,132 @@ bool success = await CustomBackgroundGeolocation.sync();
 
 ---
 
+### Step 8: Export Audit Log File & Outage Diagnostics
+
+Generate human-readable audit reports and export complete `.txt` log files directly onto the device:
+
+```dart
+// 1. Generate formatted markdown summary with color tags and fix history
+final report = await CustomBackgroundGeolocation.generateAuditReport(limit: 250);
+print(report);
+
+// 2. Export audit log directly to an on-device text file (e.g. cache/gps_tracking_audit_log.txt)
+final filePath = await CustomBackgroundGeolocation.exportAuditLogToFile();
+print('Saved audit file at: $filePath');
+
+// 3. Wipe all historical records, clear SQLite buffers, and restart fresh from 0.00 km
+await CustomBackgroundGeolocation.resetAndRestart();
+```
+
+---
+
+## 🧪 Desk Testing Mode & Offline Outage Verification System
+
+Testing background geolocation often presents a real challenge for QA and engineering teams: **how do you test offline outages, tunnels, airplane mode, and app kills without walking outside?**
+
+In standard production mode ("Field Mode"), the plugin uses smart battery-saving (`distanceFilter: 15.0m`, `stationaryRadius: 25.0m`). When the device sits still on a desk, **GPS hardware powers down completely** to preserve 0% battery drain. While ideal for end users, this makes desk QA testing difficult because turning off Wi-Fi or killing the app while motionless produces zero new GPS fixes.
+
+To solve this, the library includes a built-in **Desk Testing Mode**, **Color-Coded Outage Buffer Feed**, and **On-Device `.txt` Audit File Exporter**.
+
+---
+
+### 1. Purpose: Why These Features Were Added
+
+| Feature | Problem It Solves | How It Helps Developers & QA |
+| :--- | :--- | :--- |
+| **🧪 Desk Testing Mode (`0m Filter`)** | GPS powers off when still; testers had to walk 20+ meters outside for every single test fix. | Forces high-accuracy updates every **10 seconds** without requiring physical motion. You can test offline buffering right at your desk. |
+| **🟢 Live vs 🔴 Outage Color Coding** | Testers could not easily tell which coordinates were sent live vs which were held in the offline outage buffer. | Visually labels every card: 🟢 `[LIVE / SYNCED]` (online) vs 🔴 `[OUTAGE / KILLED BUFFER]` (airplane mode, offline, app killed). |
+| **🏷️ Card Index (`#1 (Latest)`, `#2`...)** | In a list of 50+ fixes, it was hard to track the newest point and sequence order. | Displays a reverse-chronological sequence badge (`#1 (Latest)` at the top down to `#N`) on every card and audit log line. |
+| **📋 On-Device `.txt` Audit Exporter** | QA engineers needed a concrete, shareable file of coordinates, battery, and odometer to attach to bug reports. | Writes `gps_tracking_audit_log.txt` to device storage with summary metrics, chronological fixes, and native logcat events. |
+| **🧹 Clean All & Restart** | Historical test data accumulated between test runs, skewing odometer and counts. | Top amber wipe button empties SQLite tables, clears diagnostic logs, resets odometer to `0.00 km`, and restarts fresh. |
+
+---
+
+### 2. How They Work Under the Hood
+
+#### A. Continuous Desk Tracking Architecture
+When `distanceFilter` is set to `0.0m` (or `_isDeskMode == true`):
+1. **Pacing Override**: The native Android service configures `LocationRequest` with `intervalMs = 10000ms` (10 seconds) and `minUpdateIntervalMillis = 5000ms`.
+2. **Stationary Bypass**: Setting `stationaryRadius = 0.0m` bypasses `handleEnterStationary()`, ensuring GPS stays active even though hardware accelerometers report `still`.
+3. **High Accuracy**: Retains `Priority.PRIORITY_HIGH_ACCURACY` so satellite fixes continue arriving at your desk.
+
+#### B. Offline Outage & App-Killed Detection
+1. **Native Network Check**: Android's `ConnectivityManager` continuously monitors active network capabilities.
+2. **Dynamic Sync Tagging**:
+   - When a backend `syncUrl` is configured, points are marked `is_synced = 1` only upon receiving HTTP `200 OK`.
+   - In local demo mode (no backend URL), points captured while connected and active are marked `is_synced = 1` (🟢 Live). If captured during airplane mode, Wi-Fi outage, or after the app process was terminated, they are stored with `is_synced = 0` (🔴 Outage).
+3. **Auto-Reconnection Flushing**: As soon as internet connectivity returns, native `NetworkCallback.onAvailable()` automatically detects network restoration, and marks or uploads buffered fixes in batches.
+4. **Engine Detachment Safety**: Native event sinks are dispatched through the Android Main Looper (`Looper.getMainLooper()`) guarded by `@Volatile var isEngineAttached` checks, preventing `FlutterJNI detached` crashes when the app is swiped away.
+
+---
+
+### 3. Step-by-Step QA / Desk Testing Guide
+
+#### Scenario 1: Test Offline Outage at Your Desk
+1. Open the example app and verify **`🧪 Desk Mode: 0m (Fast Updates)`** is active (default).
+2. Tap **"Start Tracking"** — observe fixes arriving every 10 seconds marked **🟢 `[LIVE / SYNCED]`**.
+3. Swipe down your Android notification shade and turn on **Airplane Mode** (or turn off Wi-Fi/Mobile Data) for 15–30 seconds.
+4. Look at the live feed — new fixes arriving during the outage are automatically tagged **🔴 `[OUTAGE / KILLED BUFFER]`**.
+5. Turn Airplane Mode off (or reconnect Wi-Fi) — tap **"Sync Queue"** or wait for auto-sync. The offline buffer flushes and pending fixes are updated.
+
+#### Scenario 2: Test App Swiped Away / App Killed Resilience
+1. Start tracking in Desk Mode or Field Mode.
+2. Swipe the app away from Android Recents (or run `adb shell am kill <package>`).
+3. Notice the persistent Android notification **"Live Geolocation & Odometer"** stays running in the system status bar.
+4. Re-open the app after 30 seconds — all location fixes, accumulated odometer, and timestamps recorded while the app was dead are loaded from SQLite and displayed.
+
+#### Scenario 3: Export & View the `.txt` Audit File
+1. Tap **"Export Audit .txt"** in the action bar.
+2. An interactive bottom sheet opens showing:
+   - Total Recorded Fixes
+   - Live vs Outage breakdown
+   - Exact device storage path (e.g. `/data/user/0/.../cache/gps_tracking_audit_log.txt`)
+3. Tap **"Copy Path"** to share the path or copy via ADB:
+   ```bash
+   adb pull /data/user/0/com.example.custom_background_geolocation_example/cache/gps_tracking_audit_log.txt ./
+   ```
+4. Scroll through the in-app preview or tap **"Copy Report Text"** to paste directly into Slack or Jira.
+
+#### Scenario 4: Clean All & Restart Fresh
+1. Tap the amber **Refresh Button (🔄)** in the top right of the AppBar.
+2. Confirm the prompt: "Clean All & Restart?".
+3. All historical SQLite locations and diagnostic logs are wiped, the odometer resets to `0.00 km`, and tracking restarts fresh from fix `#1`.
+
+---
+
+### 4. Sample Exported Audit File (`gps_tracking_audit_log.txt`)
+
+```text
+====================================================
+  CUSTOM BACKGROUND GEOLOCATION AUDIT REPORT
+  Generated: 2026-11-04 15:26:45.120
+====================================================
+
+SUMMARY:
+  • Total Recorded Fixes:    5
+  • Normal / Synced Fixes:   3 (🟢 LIVE)
+  • Outage / Offline Fixes:  2 (🔴 OUTAGE / KILLED)
+  • Current Odometer:        0.00 km
+
+----------------------------------------------------
+RECORDED GPS FIXES (Most recent first)
+----------------------------------------------------
+#1    [🟢 NORMAL/LIVE] 2026-11-04 15:26:45 | Coords: 28.626188, 77.378760 | Speed: 0.0 km/h | Odo: 0.00 km | Batt: 78% (Charging) | Motion: still
+#2    [🔴 OUTAGE/KILLED] 2026-11-04 15:26:35 | Coords: 28.626196, 77.378764 | Speed: 0.0 km/h | Odo: 0.00 km | Batt: 78% (Charging) | Motion: still
+#3    [🔴 OUTAGE/KILLED] 2026-11-04 15:26:25 | Coords: 28.626190, 77.378761 | Speed: 0.0 km/h | Odo: 0.00 km | Batt: 78% (Charging) | Motion: still
+#4    [🟢 NORMAL/LIVE] 2026-11-04 15:26:15 | Coords: 28.626195, 77.378763 | Speed: 0.0 km/h | Odo: 0.00 km | Batt: 78% (Charging) | Motion: still
+#5    [🟢 NORMAL/LIVE] 2026-11-04 15:26:05 | Coords: 28.626192, 77.378762 | Speed: 0.0 km/h | Odo: 0.00 km | Batt: 78% (Charging) | Motion: still
+
+----------------------------------------------------
+PERSISTENT SYSTEM & SERVICE DIAGNOSTIC LOGS
+----------------------------------------------------
+[15:26:40] [INFO] LocationTrackingService: Started native background tracking service (START_STICKY).
+[15:26:40] [INFO] LocationTrackingService: Fused location updates active with distanceFilter = 0.0m (interval=10000ms).
+[15:26:40] [INFO] HttpSyncManager: Registered active network connectivity listener.
+```
+
+---
+
 ## 🏆 Transistor Software Feature Comparison
 
 | Feature | Why It Matters | Custom Background Geolocation | Status |
@@ -314,6 +440,9 @@ bool success = await CustomBackgroundGeolocation.sync();
 | **DeviceSettings helper** | Opens OEM-specific battery/autostart screens (Xiaomi, Samsung, Oppo, Vivo). | Native `DeviceSettings.showPowerManager()` & `showIgnoreBatteryOptimizations()` | 🟢 Supported |
 | **Mock-location detection** | Catches spoofed GPS apps. | Built-in `isMock` detection | 🟢 Supported |
 | **Diagnostic logging** | Inspect why tracking stopped on a specific user's phone. | Persistent SQLite logs, `getLog()`, `destroyLog()`, `emailLog()` | 🟢 Supported |
+| **🧪 Desk Testing Mode (0m Continuous)** | Test offline outages and airplane mode at an office desk without walking. | 10s continuous high-accuracy fixes with stationary sleep bypass (`distanceFilter: 0.0`) | 🟢 Supported |
+| **🟢 Live vs 🔴 Outage Tagging** | Distinguish live online points from offline buffered points. | Dynamic engine attachment & network check with color-coded tags and `#index` ordering | 🟢 Supported |
+| **📋 On-Device `.txt` File Exporter** | Export shareable test reports directly on device for QA & bug reports. | Built-in `exportAuditLogToFile()` and in-app modal preview | 🟢 Supported |
 
 ---
 
