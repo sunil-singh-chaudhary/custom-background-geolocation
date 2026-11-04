@@ -49,57 +49,78 @@ class CustomBackgroundGeolocationPlugin : FlutterPlugin, ActivityAware, MethodCh
         private const val GEOFENCE_EVENT_CHANNEL_NAME = "com.custom.bglocation/events/geofence"
         private const val HEARTBEAT_EVENT_CHANNEL_NAME = "com.custom.bglocation/events/heartbeat"
 
+        @Volatile
+        private var isEngineAttached = false
+        private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
         private var locationEventSink: EventChannel.EventSink? = null
         private var motionEventSink: EventChannel.EventSink? = null
         private var geofenceEventSink: EventChannel.EventSink? = null
         private var heartbeatEventSink: EventChannel.EventSink? = null
 
         fun sendLocationEvent(entity: LocationEntity) {
-            try {
-                locationEventSink?.success(entity.toMap())
-            } catch (e: Exception) {
-                Log.w(TAG, "Error sending location to Flutter: ${e.message}")
+            if (!isEngineAttached || locationEventSink == null) return
+            val map = entity.toMap()
+            mainHandler.post {
+                if (!isEngineAttached) return@post
+                try {
+                    locationEventSink?.success(map)
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Unable to send location event (engine detached): ${t.message}")
+                }
             }
         }
 
         fun sendMotionEvent(activity: String, confidence: Int) {
-            try {
-                val map = mapOf(
-                    "activity" to activity,
-                    "confidence" to confidence,
-                    "timestamp" to System.currentTimeMillis()
-                )
-                motionEventSink?.success(map)
-            } catch (e: Exception) {
-                Log.w(TAG, "Error sending motion to Flutter: ${e.message}")
+            if (!isEngineAttached || motionEventSink == null) return
+            val map = mapOf(
+                "activity" to activity,
+                "confidence" to confidence,
+                "timestamp" to System.currentTimeMillis()
+            )
+            mainHandler.post {
+                if (!isEngineAttached) return@post
+                try {
+                    motionEventSink?.success(map)
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Unable to send motion event (engine detached): ${t.message}")
+                }
             }
         }
 
         fun sendGeofenceEvent(identifier: String, action: Int) {
-            try {
-                val map = mapOf(
-                    "identifier" to identifier,
-                    "action" to action,
-                    "timestamp" to System.currentTimeMillis()
-                )
-                geofenceEventSink?.success(map)
-            } catch (e: Exception) {
-                Log.w(TAG, "Error sending geofence to Flutter: ${e.message}")
+            if (!isEngineAttached || geofenceEventSink == null) return
+            val map = mapOf(
+                "identifier" to identifier,
+                "action" to action,
+                "timestamp" to System.currentTimeMillis()
+            )
+            mainHandler.post {
+                if (!isEngineAttached) return@post
+                try {
+                    geofenceEventSink?.success(map)
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Unable to send geofence event (engine detached): ${t.message}")
+                }
             }
         }
 
         fun sendHeartbeatEvent(latitude: Double, longitude: Double, batteryLevel: Float, isCharging: Boolean) {
-            try {
-                val map = mapOf(
-                    "latitude" to latitude,
-                    "longitude" to longitude,
-                    "batteryLevel" to batteryLevel.toDouble(),
-                    "isCharging" to isCharging,
-                    "timestamp" to System.currentTimeMillis()
-                )
-                heartbeatEventSink?.success(map)
-            } catch (e: Exception) {
-                Log.w(TAG, "Error sending heartbeat to Flutter: ${e.message}")
+            if (!isEngineAttached || heartbeatEventSink == null) return
+            val map = mapOf(
+                "latitude" to latitude,
+                "longitude" to longitude,
+                "batteryLevel" to batteryLevel.toDouble(),
+                "isCharging" to isCharging,
+                "timestamp" to System.currentTimeMillis()
+            )
+            mainHandler.post {
+                if (!isEngineAttached) return@post
+                try {
+                    heartbeatEventSink?.success(map)
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Unable to send heartbeat event (engine detached): ${t.message}")
+                }
             }
         }
     }
@@ -108,10 +129,11 @@ class CustomBackgroundGeolocationPlugin : FlutterPlugin, ActivityAware, MethodCh
     private var activity: Activity? = null
     private var activityBinding: ActivityPluginBinding? = null
 
-    private lateinit var methodChannel: MethodChannel
-    private lateinit var locationEventChannel: EventChannel
-    private lateinit var motionEventChannel: EventChannel
-    private lateinit var geofenceEventChannel: EventChannel
+    private var methodChannel: MethodChannel? = null
+    private var locationEventChannel: EventChannel? = null
+    private var motionEventChannel: EventChannel? = null
+    private var geofenceEventChannel: EventChannel? = null
+    private var heartbeatEventChannel: EventChannel? = null
 
     private lateinit var dbHelper: LocationDatabaseHelper
     private lateinit var httpSyncMgr: HttpSyncManager
@@ -123,53 +145,74 @@ class CustomBackgroundGeolocationPlugin : FlutterPlugin, ActivityAware, MethodCh
         context = binding.applicationContext
         dbHelper = LocationDatabaseHelper.getInstance(context)
         httpSyncMgr = HttpSyncManager(context)
+        isEngineAttached = true
 
-        methodChannel = MethodChannel(binding.binaryMessenger, METHOD_CHANNEL_NAME)
-        methodChannel.setMethodCallHandler(this)
+        methodChannel = MethodChannel(binding.binaryMessenger, METHOD_CHANNEL_NAME).also {
+            it.setMethodCallHandler(this)
+        }
 
-        locationEventChannel = EventChannel(binding.binaryMessenger, LOCATION_EVENT_CHANNEL_NAME)
-        locationEventChannel.setStreamHandler(object : EventChannel.StreamHandler {
-            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
-                locationEventSink = events
-            }
-            override fun onCancel(arguments: Any?) {
-                locationEventSink = null
-            }
-        })
+        locationEventChannel = EventChannel(binding.binaryMessenger, LOCATION_EVENT_CHANNEL_NAME).also {
+            it.setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    locationEventSink = events
+                }
+                override fun onCancel(arguments: Any?) {
+                    locationEventSink = null
+                }
+            })
+        }
 
-        motionEventChannel = EventChannel(binding.binaryMessenger, MOTION_EVENT_CHANNEL_NAME)
-        motionEventChannel.setStreamHandler(object : EventChannel.StreamHandler {
-            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
-                motionEventSink = events
-            }
-            override fun onCancel(arguments: Any?) {
-                motionEventSink = null
-            }
-        })
+        motionEventChannel = EventChannel(binding.binaryMessenger, MOTION_EVENT_CHANNEL_NAME).also {
+            it.setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    motionEventSink = events
+                }
+                override fun onCancel(arguments: Any?) {
+                    motionEventSink = null
+                }
+            })
+        }
 
-        geofenceEventChannel = EventChannel(binding.binaryMessenger, GEOFENCE_EVENT_CHANNEL_NAME)
-        geofenceEventChannel.setStreamHandler(object : EventChannel.StreamHandler {
-            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
-                geofenceEventSink = events
-            }
-            override fun onCancel(arguments: Any?) {
-                geofenceEventSink = null
-            }
-        })
+        geofenceEventChannel = EventChannel(binding.binaryMessenger, GEOFENCE_EVENT_CHANNEL_NAME).also {
+            it.setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    geofenceEventSink = events
+                }
+                override fun onCancel(arguments: Any?) {
+                    geofenceEventSink = null
+                }
+            })
+        }
 
-        val heartbeatEventChannel = EventChannel(binding.binaryMessenger, HEARTBEAT_EVENT_CHANNEL_NAME)
-        heartbeatEventChannel.setStreamHandler(object : EventChannel.StreamHandler {
-            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
-                heartbeatEventSink = events
-            }
-            override fun onCancel(arguments: Any?) {
-                heartbeatEventSink = null
-            }
-        })
+        heartbeatEventChannel = EventChannel(binding.binaryMessenger, HEARTBEAT_EVENT_CHANNEL_NAME).also {
+            it.setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    heartbeatEventSink = events
+                }
+                override fun onCancel(arguments: Any?) {
+                    heartbeatEventSink = null
+                }
+            })
+        }
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-        methodChannel.setMethodCallHandler(null)
+        isEngineAttached = false
+        methodChannel?.setMethodCallHandler(null)
+        methodChannel = null
+
+        locationEventChannel?.setStreamHandler(null)
+        locationEventChannel = null
+
+        motionEventChannel?.setStreamHandler(null)
+        motionEventChannel = null
+
+        geofenceEventChannel?.setStreamHandler(null)
+        geofenceEventChannel = null
+
+        heartbeatEventChannel?.setStreamHandler(null)
+        heartbeatEventChannel = null
+
         locationEventSink = null
         motionEventSink = null
         geofenceEventSink = null
