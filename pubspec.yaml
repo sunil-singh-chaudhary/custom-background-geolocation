@@ -1,0 +1,35 @@
+name: custom_background_geolocation
+description: Production-grade native background geolocation and geofencing engine with motion recognition and offline SQLite persistence.
+version: 1.0.1
+homepage: https://esimrights.in
+repository: https://github.com/sunil-singh-chaudhary/custom-background-geolocation
+issue_tracker: https://github.com/sunil-singh-chaudhary/custom-background-geolocation/issues
+
+topics:
+  - geolocation
+  - background-location
+  - tracking
+  - geofencing
+  - odometer
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: ">=3.3.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.custom.bglocation
+        pluginClass: CustomBackgroundGeolocationPlugin
+      ios:
+        pluginClass: CustomBackgroundGeolocationPlugin
