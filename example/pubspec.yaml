@@ -12,6 +12,8 @@ dependencies:
     sdk: flutter
   custom_background_geolocation:
     path: ../
+  flutter_map: ^8.3.2
+  latlong2: ^0.10.1
 
 dev_dependencies:
   flutter_test:

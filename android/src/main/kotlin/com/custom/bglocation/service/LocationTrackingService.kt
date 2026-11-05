@@ -290,7 +290,19 @@ class LocationTrackingService : Service() {
             timestamp = location.time.takeIf { it > 0 } ?: System.currentTimeMillis(),
             isSynced = isSynced,
             isMock = isMock,
-            extrasJson = extrasJson
+            extrasJson = run {
+                val extrasObj = org.json.JSONObject()
+                if (!extrasJson.isNullOrEmpty()) {
+                    try {
+                        val parsed = org.json.JSONObject(extrasJson)
+                        val it = parsed.keys()
+                        while (it.hasNext()) { val k = it.next(); extrasObj.put(k, parsed.get(k)) }
+                    } catch (_: Exception) {}
+                }
+                extrasObj.put("captured_offline", !isNetworkOnline)
+                extrasObj.put("network_available", isNetworkOnline)
+                extrasObj.toString()
+            }
         )
 
         // ALWAYS SAVE TO SQLITE FIRST (offline survival)

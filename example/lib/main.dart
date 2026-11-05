@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:custom_background_geolocation/custom_background_geolocation.dart';
+import 'map_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -196,8 +197,8 @@ class _LocationTrackerExampleAppState extends State<LocationTrackerExampleApp> {
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
         builder: (ctx) {
-          final outagePoints = _storedLocations.where((l) => !l.isSynced).length;
-          final onlinePoints = _storedLocations.where((l) => l.isSynced).length;
+          final outagePoints = _storedLocations.where((l) => l.wasOffline).length;
+          final onlinePoints = _storedLocations.where((l) => !l.wasOffline).length;
 
           return DraggableScrollableSheet(
             initialChildSize: 0.85,
@@ -390,13 +391,13 @@ class _LocationTrackerExampleAppState extends State<LocationTrackerExampleApp> {
   @override
   Widget build(BuildContext context) {
     final filteredLocations = _storedLocations.where((loc) {
-      if (_selectedFilter == LogFilter.outage) return !loc.isSynced;
-      if (_selectedFilter == LogFilter.online) return loc.isSynced;
+      if (_selectedFilter == LogFilter.outage) return loc.wasOffline;
+      if (_selectedFilter == LogFilter.online) return !loc.wasOffline;
       return true;
     }).toList();
 
-    final outageCount = _storedLocations.where((l) => !l.isSynced).length;
-    final onlineCount = _storedLocations.where((l) => l.isSynced).length;
+    final outageCount = _storedLocations.where((l) => l.wasOffline).length;
+    final onlineCount = _storedLocations.where((l) => !l.wasOffline).length;
 
     return Scaffold(
       appBar: AppBar(
@@ -404,6 +405,19 @@ class _LocationTrackerExampleAppState extends State<LocationTrackerExampleApp> {
         backgroundColor: const Color(0xFF0F172A),
         foregroundColor: Colors.white,
         actions: [
+          IconButton(
+            tooltip: 'View Route on Map',
+            icon: const Icon(Icons.map_outlined),
+            color: const Color(0xFF10B981),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => LocationMapScreen(locations: _storedLocations),
+                ),
+              );
+            },
+          ),
           IconButton(
             tooltip: 'Audit & Export .txt File',
             icon: const Icon(Icons.description_outlined),
@@ -584,6 +598,32 @@ class _LocationTrackerExampleAppState extends State<LocationTrackerExampleApp> {
               child: Row(
                 children: [
                   Expanded(
+                    flex: 4,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF10B981),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      icon: const Icon(Icons.map, size: 18),
+                      label: Text(
+                        'Map (${_storedLocations.length})',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => LocationMapScreen(locations: _storedLocations),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    flex: 4,
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF0284C7),
@@ -592,12 +632,13 @@ class _LocationTrackerExampleAppState extends State<LocationTrackerExampleApp> {
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
                       icon: const Icon(Icons.file_download_outlined, size: 18),
-                      label: const Text('Export Audit .txt', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                      label: const Text('Export .txt', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                       onPressed: _exportAndShowAuditLog,
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
                   Expanded(
+                    flex: 3,
                     child: OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
                         foregroundColor: const Color(0xFF38BDF8),
@@ -605,8 +646,8 @@ class _LocationTrackerExampleAppState extends State<LocationTrackerExampleApp> {
                         padding: const EdgeInsets.symmetric(vertical: 10),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
-                      icon: const Icon(Icons.cloud_sync, size: 18),
-                      label: Text('Sync Queue ($_unsyncedCount)', style: const TextStyle(fontSize: 12)),
+                      icon: const Icon(Icons.cloud_sync, size: 16),
+                      label: Text('Sync ($_unsyncedCount)', style: const TextStyle(fontSize: 11)),
                       onPressed: () async {
                         final ok = await CustomBackgroundGeolocation.sync();
                         await _refreshFromDatabase();
@@ -684,9 +725,9 @@ class _LocationTrackerExampleAppState extends State<LocationTrackerExampleApp> {
                         itemCount: filteredLocations.length,
                         itemBuilder: (context, index) {
                           final loc = filteredLocations[index];
-                          final isOutage = !loc.isSynced;
+                          final isOutage = loc.wasOffline;
 
-                          // Color-coded styling: RED for Outage/App-Killed, GREEN for Normal/Online
+                          // Color-coded styling: RED for Outage/Offline, GREEN for Live Online
                           final borderColor = isOutage
                               ? Colors.redAccent.withValues(alpha: 0.5)
                               : Colors.greenAccent.withValues(alpha: 0.3);
@@ -694,7 +735,9 @@ class _LocationTrackerExampleAppState extends State<LocationTrackerExampleApp> {
                               ? Colors.redAccent.withValues(alpha: 0.08)
                               : Colors.greenAccent.withValues(alpha: 0.04);
                           final tagColor = isOutage ? Colors.redAccent : Colors.greenAccent;
-                          final tagText = isOutage ? '🔴 OUTAGE / KILLED BUFFER' : '🟢 LIVE / SYNCED';
+                          final tagText = isOutage
+                              ? (loc.isSynced ? '🔴 OUTAGE FIX (SYNCED)' : '🔴 OUTAGE BUFFER (UNSYNCED)')
+                              : '🟢 LIVE / ONLINE';
 
                           return Container(
                             margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),

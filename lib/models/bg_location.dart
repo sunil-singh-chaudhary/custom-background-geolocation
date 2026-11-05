@@ -16,6 +16,7 @@ class BgLocation {
   final bool batteryIsCharging;
   final int timestamp;
   final bool isSynced;
+  final bool isOutage;
   final bool isMock;
   final Map<String, dynamic>? extras;
 
@@ -88,6 +89,9 @@ class BgLocation {
 
   /// Cumulative odometer distance in kilometers.
   double get odometerKm => (odometer / 1000.0);
+
+  /// Whether this fix was captured during an offline outage (Wi-Fi/Cellular disconnected).
+  bool get wasOffline => extras?['captured_offline'] == true || !isSynced;
 
   /// Battery level formatted as integer percentage (0–100%).
   int get batteryPercent => (batteryLevel * 100).round();
