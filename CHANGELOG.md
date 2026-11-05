@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.1.1
+
+* **Universal Gradle Build Compatibility**: Standardized Android build script to use `com.android.library` with `compileOptions` Java 17 bytecode targeting. Eliminated redundant `kotlin-android` plugin invocation and `kotlinOptions` block, preventing cross-drive path relativization errors on Windows (`different roots`) and ensuring seamless compatibility across all operating systems and Gradle/AGP versions.
+
 ## 1.1.0
 
 * **Hardware Significant Motion Sensor**: Integrated `Sensor.TYPE_SIGNIFICANT_MOTION` to wake up high-accuracy GPS on physical movement while allowing 100% deep sleep overnight (< 1–2% battery consumption).
@@ -28,4 +32,3 @@ All notable changes to this project will be documented in this file.
 * Integrated motion activity transitions (still, walking, running, in-vehicle).
 * Circular stationary geofence auto-management to eliminate GPS battery drain while at rest.
 * One-line developer API (`CustomBackgroundGeolocation.quickStart` and `.listen`).
-* Built-in diagnostic logging and email log export.
