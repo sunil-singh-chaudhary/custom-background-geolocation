@@ -28,7 +28,7 @@ class _LocationTrackerExampleAppState extends State<LocationTrackerExampleApp> {
   int _unsyncedCount = 0;
   LogFilter _selectedFilter = LogFilter.all;
   String? _lastExportedFilePath;
-  bool _isDeskMode = true; // Enabled by default so testers can test from their desk without moving!
+  bool _isDeskMode = false; // Default to Battery-Saving Field Mode (Auto-sleeps at night, auto-wakes on movement)
 
   @override
   void initState() {
