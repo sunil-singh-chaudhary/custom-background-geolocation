@@ -688,9 +688,9 @@ class _LocationTrackerExampleAppState extends State<LocationTrackerExampleApp> {
                 children: [
                   _filterChip(LogFilter.all, 'All (${_storedLocations.length})'),
                   const SizedBox(width: 8),
-                  _filterChip(LogFilter.outage, '🔴 Outage / Killed ($outageCount)'),
+                  _filterChip(LogFilter.outage, '🟠 Outage Positions ($outageCount)'),
                   const SizedBox(width: 8),
-                  _filterChip(LogFilter.online, '🟢 Normal ($onlineCount)'),
+                  _filterChip(LogFilter.online, '🟢 Live Online ($onlineCount)'),
                 ],
               ),
             ),
@@ -725,112 +725,146 @@ class _LocationTrackerExampleAppState extends State<LocationTrackerExampleApp> {
                         itemCount: filteredLocations.length,
                         itemBuilder: (context, index) {
                           final loc = filteredLocations[index];
-                          final isOutage = loc.wasOffline;
+                          final isOutage = loc.isOutage;
 
-                          // Color-coded styling: RED for Outage/Offline, GREEN for Live Online
+                          // High-contrast color styling:
+                          // Amber-Orange for OUTAGE POSITION (Saved by Odometer while Wi-Fi/Internet was off)
+                          // Emerald-Green for LIVE ONLINE POSITION
                           final borderColor = isOutage
-                              ? Colors.redAccent.withValues(alpha: 0.5)
-                              : Colors.greenAccent.withValues(alpha: 0.3);
+                              ? const Color(0xFFF59E0B)
+                              : const Color(0xFF10B981).withValues(alpha: 0.4);
                           final bgColor = isOutage
-                              ? Colors.redAccent.withValues(alpha: 0.08)
-                              : Colors.greenAccent.withValues(alpha: 0.04);
-                          final tagColor = isOutage ? Colors.redAccent : Colors.greenAccent;
+                              ? const Color(0xFFF59E0B).withValues(alpha: 0.12)
+                              : const Color(0xFF10B981).withValues(alpha: 0.05);
+                          final tagColor = isOutage ? const Color(0xFFF59E0B) : const Color(0xFF10B981);
                           final tagText = isOutage
-                              ? (loc.isSynced ? '🔴 OUTAGE FIX (SYNCED)' : '🔴 OUTAGE BUFFER (UNSYNCED)')
-                              : '🟢 LIVE / ONLINE';
+                              ? '⚠️ OUTAGE POSITION • ODOMETER (${loc.odometerKm.toStringAsFixed(2)} km)'
+                              : '🟢 LIVE ONLINE POSITION';
 
-                          return Container(
-                            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: bgColor,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: borderColor),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                          decoration: BoxDecoration(
-                                            color: tagColor.withValues(alpha: 0.18),
-                                            borderRadius: BorderRadius.circular(4),
-                                            border: Border.all(color: tagColor.withValues(alpha: 0.5)),
-                                          ),
-                                          child: Text(
-                                            index == 0 ? '#1 (Latest)' : '#${index + 1}',
-                                            style: TextStyle(
-                                              color: tagColor,
-                                              fontWeight: FontWeight.w900,
-                                              fontSize: 10,
-                                              fontFamily: 'monospace',
+                          return InkWell(
+                            borderRadius: BorderRadius.circular(10),
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => LocationMapScreen(
+                                    locations: _storedLocations,
+                                    initialFocusIndex: _storedLocations.indexOf(loc),
+                                  ),
+                                ),
+                              );
+                            },
+                            child: Container(
+                              margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: bgColor,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: borderColor, width: isOutage ? 1.6 : 1.0),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: tagColor.withValues(alpha: 0.2),
+                                              borderRadius: BorderRadius.circular(4),
+                                              border: Border.all(color: tagColor),
+                                            ),
+                                            child: Text(
+                                              index == 0 ? '#1 (Latest)' : '#${index + 1}',
+                                              style: TextStyle(
+                                                color: tagColor,
+                                                fontWeight: FontWeight.w900,
+                                                fontSize: 10,
+                                                fontFamily: 'monospace',
+                                              ),
                                             ),
                                           ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          tagText,
-                                          style: TextStyle(
-                                            color: tagColor,
+                                          const SizedBox(width: 8),
+                                          Flexible(
+                                            child: Text(
+                                              tagText,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                color: tagColor,
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 10,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(Icons.map, size: 14, color: Color(0xFF38BDF8)),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            '${loc.dateTime.hour.toString().padLeft(2, '0')}:${loc.dateTime.minute.toString().padLeft(2, '0')}:${loc.dateTime.second.toString().padLeft(2, '0')}',
+                                            style: const TextStyle(color: Colors.white54, fontSize: 10),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Row(
+                                    children: [
+                                      Icon(Icons.place, size: 14, color: isOutage ? const Color(0xFFF59E0B) : const Color(0xFF38BDF8)),
+                                      const SizedBox(width: 4),
+                                      Expanded(
+                                        child: Text(
+                                          loc.coordinates,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontFamily: 'monospace',
+                                            fontSize: 11,
                                             fontWeight: FontWeight.bold,
-                                            fontSize: 10,
                                           ),
                                         ),
-                                      ],
-                                    ),
-                                    Text(
-                                      '${loc.dateTime.hour.toString().padLeft(2, '0')}:${loc.dateTime.minute.toString().padLeft(2, '0')}:${loc.dateTime.second.toString().padLeft(2, '0')}',
-                                      style: const TextStyle(color: Colors.white38, fontSize: 10),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                Row(
-                                  children: [
-                                    const Icon(Icons.place, size: 14, color: Color(0xFF38BDF8)),
-                                    const SizedBox(width: 4),
-                                    Expanded(
-                                      child: Text(
-                                        loc.coordinates,
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontFamily: 'monospace',
+                                      ),
+                                      Text(
+                                        '${loc.speedKmH.toStringAsFixed(1)} km/h',
+                                        style: const TextStyle(color: Colors.white70, fontSize: 11),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        '📏 Odometer: ${loc.odometerKm.toStringAsFixed(2)} km',
+                                        style: TextStyle(
+                                          color: isOutage ? const Color(0xFFF59E0B) : const Color(0xFF38BDF8),
                                           fontSize: 11,
                                           fontWeight: FontWeight.bold,
                                         ),
                                       ),
-                                    ),
-                                    Text(
-                                      '${loc.speedKmH.toStringAsFixed(1)} km/h',
-                                      style: const TextStyle(color: Colors.white70, fontSize: 11),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      '📏 Odo: ${loc.odometerKm.toStringAsFixed(2)} km',
-                                      style: const TextStyle(color: Colors.white60, fontSize: 11),
-                                    ),
-                                    Text(
-                                      '🔋 ${loc.batteryPercent}%${loc.batteryIsCharging ? "⚡" : ""}',
-                                      style: const TextStyle(color: Colors.white60, fontSize: 11),
-                                    ),
-                                    Text(
-                                      '🏃 ${loc.activityType}',
-                                      style: const TextStyle(color: Colors.white60, fontSize: 11),
-                                    ),
-                                  ],
-                                ),
-                              ],
+                                      Text(
+                                        '🎯 ±${loc.accuracy.toStringAsFixed(0)}m',
+                                        style: const TextStyle(color: Colors.white60, fontSize: 11),
+                                      ),
+                                      Text(
+                                        '🔋 ${loc.batteryPercent}%${loc.batteryIsCharging ? "⚡" : ""}',
+                                        style: const TextStyle(color: Colors.white60, fontSize: 11),
+                                      ),
+                                      Text(
+                                        '🏃 ${loc.activityType}',
+                                        style: const TextStyle(color: Colors.white60, fontSize: 11),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
                             ),
                           );
                         },

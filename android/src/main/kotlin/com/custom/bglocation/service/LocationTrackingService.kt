@@ -300,6 +300,9 @@ class LocationTrackingService : Service() {
                     } catch (_: Exception) {}
                 }
                 extrasObj.put("captured_offline", !isNetworkOnline)
+                extrasObj.put("is_outage", !isNetworkOnline)
+                extrasObj.put("saved_by_odometer", true)
+                extrasObj.put("odometer_meters", totalOdometer)
                 extrasObj.put("network_available", isNetworkOnline)
                 extrasObj.toString()
             }

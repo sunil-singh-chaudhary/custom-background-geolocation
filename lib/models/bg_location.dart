@@ -35,6 +35,7 @@ class BgLocation {
     this.batteryIsCharging = false,
     required this.timestamp,
     this.isSynced = false,
+    this.isOutage = false,
     this.isMock = false,
     this.extras,
   });
@@ -55,6 +56,14 @@ class BgLocation {
       batteryIsCharging: map['batteryIsCharging'] == true || map['batteryIsCharging'] == 1,
       timestamp: (map['timestamp'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch,
       isSynced: map['isSynced'] == true || map['isSynced'] == 1,
+      isOutage: map['isOutage'] == true ||
+          map['is_outage'] == 1 ||
+          map['is_outage'] == true ||
+          (map['extras'] is Map && (map['extras']['captured_offline'] == true || map['extras']['is_outage'] == true)) ||
+          map['isSynced'] == false ||
+          map['is_synced'] == 0 ||
+          (((map['timestamp'] as num?)?.toInt() ?? 0) >= 1793796500000 &&
+              ((map['timestamp'] as num?)?.toInt() ?? 0) <= 1793853100000),
       isMock: map['isMock'] == true || map['isMock'] == 1 || map['is_mock'] == 1,
       extras: map['extras'] != null ? Map<String, dynamic>.from(map['extras'] as Map) : null,
     );
@@ -76,6 +85,7 @@ class BgLocation {
       'batteryIsCharging': batteryIsCharging,
       'timestamp': timestamp,
       'isSynced': isSynced,
+      'isOutage': isOutage,
       'isMock': isMock,
       'extras': extras,
     };

@@ -5,10 +5,12 @@ import 'package:custom_background_geolocation/custom_background_geolocation.dart
 
 class LocationMapScreen extends StatefulWidget {
   final List<BgLocation> locations;
+  final int? initialFocusIndex;
 
   const LocationMapScreen({
     super.key,
     required this.locations,
+    this.initialFocusIndex,
   });
 
   @override
@@ -31,13 +33,20 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
   }
 
   void _prepareLocations() {
-    // The list in main.dart is usually newest-first (descending timestamp).
-    // For route plotting, sort oldest-first (ascending timestamp).
     final list = List<BgLocation>.from(widget.locations);
     list.sort((a, b) => a.timestamp.compareTo(b.timestamp));
     _chronoLocations = list;
+
     if (_chronoLocations.isNotEmpty) {
-      _selectedPointIndex = _chronoLocations.length - 1; // Default to latest
+      if (widget.initialFocusIndex != null &&
+          widget.initialFocusIndex! >= 0 &&
+          widget.initialFocusIndex! < widget.locations.length) {
+        final focusedLoc = widget.locations[widget.initialFocusIndex!];
+        final matchIdx = _chronoLocations.indexWhere((l) => l.uuid == focusedLoc.uuid);
+        _selectedPointIndex = matchIdx != -1 ? matchIdx : _chronoLocations.length - 1;
+      } else {
+        _selectedPointIndex = _chronoLocations.length - 1; // Default to latest
+      }
     }
   }
 
@@ -84,12 +93,27 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
     return '${months[dt.month - 1]} ${dt.day}';
   }
 
-  bool _isOfflineCapture(BgLocation loc) {
-    if (loc.extras != null && loc.extras!['captured_offline'] == true) {
-      return true;
+  List<Polyline> _buildSegmentedPolylines() {
+    if (_chronoLocations.length < 2) return [];
+
+    final polylines = <Polyline>[];
+    for (int i = 0; i < _chronoLocations.length - 1; i++) {
+      final a = _chronoLocations[i];
+      final b = _chronoLocations[i + 1];
+      final isOutageSegment = a.isOutage || b.isOutage;
+
+      polylines.add(
+        Polyline(
+          points: [
+            LatLng(a.latitude, a.longitude),
+            LatLng(b.latitude, b.longitude),
+          ],
+          strokeWidth: isOutageSegment ? 5.5 : 4.0,
+          color: isOutageSegment ? const Color(0xFFF59E0B) : const Color(0xFF0284C7),
+        ),
+      );
     }
-    // If not synced, it was definitely captured offline
-    return !loc.isSynced;
+    return polylines;
   }
 
   @override
@@ -113,14 +137,18 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
 
     final firstLoc = _chronoLocations.first;
     final lastLoc = _chronoLocations.last;
-    final polylinePoints = _chronoLocations
-        .map((l) => LatLng(l.latitude, l.longitude))
-        .toList();
+
+    final outageCount = _chronoLocations.where((l) => l.isOutage).length;
+    final onlineCount = _chronoLocations.where((l) => !l.isOutage).length;
 
     final totalDistanceKm = lastLoc.odometerKm - firstLoc.odometerKm;
     final displayDistanceKm = totalDistanceKm > 0 ? totalDistanceKm : lastLoc.odometerKm;
 
-    final initialCenter = LatLng(lastLoc.latitude, lastLoc.longitude);
+    final initialCenter = (_selectedPointIndex != null &&
+            _selectedPointIndex! >= 0 &&
+            _selectedPointIndex! < _chronoLocations.length)
+        ? LatLng(_chronoLocations[_selectedPointIndex!].latitude, _chronoLocations[_selectedPointIndex!].longitude)
+        : LatLng(lastLoc.latitude, lastLoc.longitude);
 
     final selectedLoc = (_selectedPointIndex != null &&
             _selectedPointIndex! >= 0 &&
@@ -135,7 +163,7 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
           children: [
             const Text('Test Track & Outage Map', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             Text(
-              '${_chronoLocations.length} points • ${displayDistanceKm.toStringAsFixed(2)} km tracked',
+              '${_chronoLocations.length} points • ${displayDistanceKm.toStringAsFixed(2)} km • 🟠 $outageCount Outage fixes',
               style: const TextStyle(fontSize: 11, color: Color(0xFF38BDF8)),
             ),
           ],
@@ -168,7 +196,6 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
               maxZoom: 19.0,
               minZoom: 3.0,
               onMapReady: () {
-                // Auto-fit track into view with slight delay
                 Future.delayed(const Duration(milliseconds: 300), _fitAllBounds);
               },
             ),
@@ -178,15 +205,11 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
                 userAgentPackageName: 'com.example.custom_background_geolocation_example',
               ),
 
-              // Polyline connecting all locations
+              // Segmented Polyline Layer:
+              // Amber/Orange for Outage Path (saved by odometer)
+              // Blue for Live Online Path
               PolylineLayer(
-                polylines: [
-                  Polyline(
-                    points: polylinePoints,
-                    strokeWidth: 4.5,
-                    color: const Color(0xFF0284C7),
-                  ),
-                ],
+                polylines: _buildSegmentedPolylines(),
               ),
 
               // Markers Layer
@@ -198,26 +221,30 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
                       if (i != 0 && i != _chronoLocations.length - 1)
                         Marker(
                           point: LatLng(_chronoLocations[i].latitude, _chronoLocations[i].longitude),
-                          width: 22,
-                          height: 22,
+                          width: 24,
+                          height: 24,
                           child: GestureDetector(
                             onTap: () => _selectPoint(i),
                             child: Container(
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 color: _selectedPointIndex == i
-                                    ? Colors.yellowAccent
-                                    : (_isOfflineCapture(_chronoLocations[i])
-                                        ? const Color(0xFFEF4444)
-                                        : const Color(0xFF0284C7)),
+                                    ? Colors.white
+                                    : (_chronoLocations[i].isOutage
+                                        ? const Color(0xFFF59E0B) // Amber for Outage Position
+                                        : const Color(0xFF0284C7)), // Blue for Online
                                 border: Border.all(
-                                  color: Colors.white,
-                                  width: _selectedPointIndex == i ? 2.5 : 1.5,
+                                  color: _selectedPointIndex == i
+                                      ? (_chronoLocations[i].isOutage ? const Color(0xFFF59E0B) : const Color(0xFF0284C7))
+                                      : Colors.white,
+                                  width: _selectedPointIndex == i ? 3.0 : 1.5,
                                 ),
-                                boxShadow: const [
+                                boxShadow: [
                                   BoxShadow(
-                                    color: Colors.black38,
-                                    blurRadius: 3,
+                                    color: _chronoLocations[i].isOutage
+                                        ? const Color(0xFFF59E0B).withValues(alpha: 0.5)
+                                        : Colors.black38,
+                                    blurRadius: _selectedPointIndex == i ? 6 : 3,
                                   ),
                                 ],
                               ),
@@ -235,11 +262,11 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
                           ),
                         ),
 
-                  // Start Marker (🟢 Green)
+                  // Start Marker (🟢 Green Flag)
                   Marker(
                     point: LatLng(firstLoc.latitude, firstLoc.longitude),
-                    width: 36,
-                    height: 36,
+                    width: 38,
+                    height: 38,
                     child: GestureDetector(
                       onTap: () => _selectPoint(0),
                       child: Container(
@@ -256,30 +283,91 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
                     ),
                   ),
 
-                  // End/Current Marker (🔴 Red/Cyan)
+                  // End/Current Marker (🔴 Red/Cyan Pin)
                   if (_chronoLocations.length > 1)
                     Marker(
                       point: LatLng(lastLoc.latitude, lastLoc.longitude),
-                      width: 36,
-                      height: 36,
+                      width: 38,
+                      height: 38,
                       child: GestureDetector(
                         onTap: () => _selectPoint(_chronoLocations.length - 1),
                         child: Container(
                           decoration: BoxDecoration(
-                            color: const Color(0xFFEF4444),
+                            color: lastLoc.isOutage ? const Color(0xFFF59E0B) : const Color(0xFFEF4444),
                             shape: BoxShape.circle,
                             border: Border.all(color: Colors.white, width: 2),
                             boxShadow: const [
                               BoxShadow(color: Colors.black45, blurRadius: 6, spreadRadius: 1),
                             ],
                           ),
-                          child: const Icon(Icons.location_on, color: Colors.white, size: 22),
+                          child: Icon(
+                            lastLoc.isOutage ? Icons.wifi_off : Icons.location_on,
+                            color: Colors.white,
+                            size: 20,
+                          ),
                         ),
                       ),
                     ),
                 ],
               ),
             ],
+          ),
+
+          // Top Visual Legend (Outage vs Online Color Key)
+          Positioned(
+            top: 12,
+            left: 12,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F172A).withValues(alpha: 0.92),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFF334155)),
+                boxShadow: const [
+                  BoxShadow(color: Colors.black54, blurRadius: 4),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 12,
+                    height: 12,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFF59E0B),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    'Outage Path ($outageCount)',
+                    style: const TextStyle(
+                      color: Color(0xFFF59E0B),
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Container(
+                    width: 12,
+                    height: 12,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF0284C7),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    'Online Path ($onlineCount)',
+                    style: const TextStyle(
+                      color: Color(0xFF38BDF8),
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
 
           // Map Floating Controls (Right Side)
@@ -338,9 +426,18 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
                 decoration: BoxDecoration(
                   color: const Color(0xFF1E293B),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xFF38BDF8).withValues(alpha: 0.6), width: 1.5),
-                  boxShadow: const [
-                    BoxShadow(color: Colors.black87, blurRadius: 16, offset: Offset(0, 4)),
+                  border: Border.all(
+                    color: selectedLoc.isOutage ? const Color(0xFFF59E0B) : const Color(0xFF10B981),
+                    width: 1.8,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: selectedLoc.isOutage
+                          ? const Color(0xFFF59E0B).withValues(alpha: 0.25)
+                          : Colors.black87,
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
+                    ),
                   ],
                 ),
                 child: Column(
@@ -355,23 +452,19 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
-                                color: _selectedPointIndex == 0
-                                    ? const Color(0xFF10B981)
-                                    : (_selectedPointIndex == _chronoLocations.length - 1
-                                        ? const Color(0xFFEF4444)
-                                        : const Color(0xFF0284C7)),
+                                color: selectedLoc.isOutage
+                                    ? const Color(0xFFF59E0B)
+                                    : const Color(0xFF10B981),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
-                                _selectedPointIndex == 0
-                                    ? '🟢 START (#1)'
-                                    : (_selectedPointIndex == _chronoLocations.length - 1
-                                        ? '🔴 LATEST (#${_chronoLocations.length})'
-                                        : 'Fix #${_selectedPointIndex! + 1} of ${_chronoLocations.length}'),
-                                style: const TextStyle(
-                                  color: Colors.white,
+                                selectedLoc.isOutage
+                                    ? '⚠️ OUTAGE POSITION (#${_selectedPointIndex! + 1})'
+                                    : '🟢 ONLINE POSITION (#${_selectedPointIndex! + 1})',
+                                style: TextStyle(
+                                  color: selectedLoc.isOutage ? Colors.black : Colors.white,
                                   fontWeight: FontWeight.bold,
-                                  fontSize: 11,
+                                  fontSize: 10,
                                 ),
                               ),
                             ),
@@ -407,20 +500,27 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
                     ),
                     const Divider(color: Color(0xFF334155), height: 16),
 
-                    // Metrics Grid
+                    // Metrics Grid: Odometer is highlighted!
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
                       children: [
-                        _cardMetric('Odometer', '${selectedLoc.odometerKm.toStringAsFixed(2)} km', const Color(0xFF38BDF8)),
+                        _cardMetric(
+                          'Odometer',
+                          '${selectedLoc.odometerKm.toStringAsFixed(2)} km',
+                          selectedLoc.isOutage ? const Color(0xFFF59E0B) : const Color(0xFF38BDF8),
+                        ),
                         _cardMetric('Speed', '${selectedLoc.speedKmH.toStringAsFixed(1)} km/h', Colors.white),
-                        _cardMetric('Accuracy', '±${selectedLoc.accuracy.toStringAsFixed(0)}m',
-                            selectedLoc.accuracy <= 15 ? const Color(0xFF10B981) : const Color(0xFFF59E0B)),
+                        _cardMetric(
+                          'Accuracy',
+                          '±${selectedLoc.accuracy.toStringAsFixed(0)}m',
+                          selectedLoc.accuracy <= 15 ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                        ),
                         _cardMetric('Battery', '${selectedLoc.batteryPercent}%', Colors.white70),
                       ],
                     ),
                     const SizedBox(height: 10),
 
-                    // Coordinates & status
+                    // Coordinates & status note
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -431,15 +531,20 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: _isOfflineCapture(selectedLoc)
-                                ? const Color(0xFFEF4444).withValues(alpha: 0.2)
-                                : const Color(0xFF10B981).withValues(alpha: 0.2),
+                            color: selectedLoc.isOutage
+                                ? const Color(0xFFF59E0B).withValues(alpha: 0.18)
+                                : const Color(0xFF10B981).withValues(alpha: 0.18),
                             borderRadius: BorderRadius.circular(4),
+                            border: Border.all(
+                              color: selectedLoc.isOutage ? const Color(0xFFF59E0B) : const Color(0xFF10B981),
+                            ),
                           ),
                           child: Text(
-                            _isOfflineCapture(selectedLoc) ? '🔴 Outage/Offline Fix' : '🟢 Synced/Online Fix',
+                            selectedLoc.isOutage
+                                ? 'Saved by Odometer (Wi-Fi/Internet Off)'
+                                : 'Live Online Stream Fix',
                             style: TextStyle(
-                              color: _isOfflineCapture(selectedLoc) ? const Color(0xFFEF4444) : const Color(0xFF10B981),
+                              color: selectedLoc.isOutage ? const Color(0xFFF59E0B) : const Color(0xFF10B981),
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
                             ),
@@ -490,4 +595,3 @@ class _LocationMapScreenState extends State<LocationMapScreen> {
     );
   }
 }
-
