@@ -1,6 +1,6 @@
 name: custom_background_geolocation
 description: Production-grade native background geolocation and geofencing engine with motion recognition and offline SQLite persistence.
-version: 1.0.1
+version: 1.1.0
 homepage: https://esimrights.in
 repository: https://github.com/sunil-singh-chaudhary/custom-background-geolocation
 issue_tracker: https://github.com/sunil-singh-chaudhary/custom-background-geolocation/issues

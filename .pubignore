@@ -1,0 +1,18 @@
+# Build and test artifacts
+build/
+android/build/
+example/build/
+.dart_tool/
+
+# Local databases and logs
+*.db
+*.txt
+custom_bg_locations.db
+pulled_locations.db
+
+# Private or local docs
+doc/
+
+# IDE files
+.idea/
+*.iml
